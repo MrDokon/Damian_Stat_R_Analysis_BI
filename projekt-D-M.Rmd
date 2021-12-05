@@ -1,0 +1,400 @@
+---
+title: "Analiza użycia środków odurzających w USA w roku 2015 w różnych grupach wiekowych"
+author: "Mateusz Nowak, Damian Okoń"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+---
+
+<style>
+  body {
+    text-align: justify;
+    font-family: "Garamond";
+    font-size: 16px;
+    background-color: #F0F0F0;
+  }
+  h4{   
+    font-size: 24px;
+  }
+  h1{
+    font-size: 40px;
+  }
+  h2{
+    font-size: 32px;
+  }
+  h1,h2,h4{
+    font-weight: bold;
+  }
+  div{
+    background-color: #FFFFFF;
+  }
+</style>
+<div>
+
+```{r setup, include=FALSE}
+#Domyślne
+knitr::opts_chunk$set(echo = TRUE)
+#Importowanie bibliotek
+library(fivethirtyeight)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(circlize)
+library(xml2)
+library(plotly)
+library(kableExtra)
+```
+
+# Wprowadzenie
+
+Celem niniejszego raportu jest przedstawienie użycia poszczególnych środków odurzających w populacji Amerykańskiej. Pracę podzielono na dwie analizy. Pierwsza z nich pokazuje jaki procent Amerykanów zażyło konkretną substancję psychoaktywną z podziałem na grupy wiekowe. Druga natomiast przedstawia częstotliwość ich zażycia w poszczególnych grupach wiekowych. Dane pochodzą z roku 2015 i dotyczą okresu 12 miesięcy przed przeprowadzeniem badania.
+
+## Obróbka danych
+
+Dane pochodzą z pakietu `fivethirtyeight` `drug_use`.
+
+Składają się 28 kolumn oraz 17 wierszy.
+
+Każdy rekord przedstawia dane o procentowym spożyciu poszczególnych używek oraz medianie częstotliwości ich spożycia w ramach podanych grup wiekowych w ciągu 12 miesięcy od przeprowadzenia badania.
+
+```{r dane}
+#Przy dołączonym pakiecie fivethirtyeight
+drg <- drug_use
+```
+
+## Wykorzystane zmienne
+
+Lista zmiennych wykorzystanych w analizie:
+
+
+```{r vars, echo=FALSE}
+#Pozyskanie opisu danych danych ze strony github
+opis_dane_do_analizy0 <- read_html("https://github.com/fivethirtyeight/data/tree/master/drug-use-by-age")
+
+#Przekształcanie danych 
+#Ekstrakcja po ścieżce xpath (tak jest zwykle najszybciej)
+opis_dane_do_analizy01 <- opis_dane_do_analizy0  %>%
+  xml_find_all(xpath = "//h1[text()='Drug Use By Age']/following-sibling::table") %>% 
+  rvest::html_table()
+
+#
+opis_dane_do_analizy <- opis_dane_do_analizy01[[1]]
+
+#Tlumaczenie na polski
+#Wektory
+drugs <- c("alcohol","marijuana", "cocaine", "crack", "heroin", "hallucinogens", "inhalants", "pain relievers", "oxycontin",
+                   "tranquilizer", "stimulants", "meth", "sedatives")
+uzywki <- c("alkohol", "marihuana", "kokaina", "krak", "heroina", "halucynogeny", "wziewne środki odurzające", "środki przeciwbólowe",
+         "oksykontyna", "środki uspokajające", "środki pobudzające", "metamfetamina", "środki sedacyjne")
+#Ramka z wektorów
+translator <- data.frame(drugs,uzywki)
+
+#Tłumaczenie poprzez zamiane ciągów znaków
+opis_dane_do_analizy$Definition <- gsub("Percentage of those in an age group who used", "Procent osób, które korzystały z:", opis_dane_do_analizy$Definition)
+opis_dane_do_analizy$Definition <- gsub("Median number of times a user in an age group used", "Mediana ile razy osoba korzystała z:", opis_dane_do_analizy$Definition)
+opis_dane_do_analizy$Definition <- gsub("in the past 12 months", "", opis_dane_do_analizy$Definition)
+for(i in 1:13){
+  opis_dane_do_analizy$Definition <- gsub(translator[i,1], translator[i,2], opis_dane_do_analizy$Definition)
+}
+#Tłumaczenie nagłowków kolumn
+colnames(opis_dane_do_analizy) <- c("Nagłówek", "Definicja")
+#Dodanie 2 etykiet age i n
+opis_dane_do_analizy <-  opis_dane_do_analizy %>%  add_row(Nagłówek = "age", Definicja = "Grupa wiekowa badanych")
+opis_dane_do_analizy <-  opis_dane_do_analizy %>% add_row(Nagłówek = "n", Definicja ="Liczba respondentów dla danej grupy wiekowej")
+
+knitr::kable(opis_dane_do_analizy %>% select(Nagłówek, Definicja)) %>% 
+  kable_styling(bootstrap_options = "hover")
+```
+# Analiza
+
+Dane zanalizowano następująco:
+ 
+* Jaki procent ankietowanych korzystał z poszczególnych używek
+* Jak często korzystano z poszczególnych używek
+
+Obie analizy przeprowadzono z podziałem na odpowiednie grupy wiekowe.
+
+## Procentowe użycie
+
+Jako, że alkohol jest substancją najpowszechniejszą założono, że będzie on zdecydowanie przodował w zestawieniu popularności spożycia. Zatem w pierwszej kolejności porównano procentowe użycie pozostałych środków odurzających. W tym celu naniesiono na wykres (siatkę wykresów) procentowy udział wszystkich używek w każdej grupie wiekowej.
+
+#### Wykres procentowego rozkładu środków odurzających w USA według grup wiekowych (bez alkoholu)
+```{r wykres1, fig.width=9, fig.height=9,dpi=140}
+paleta <- c("#FFC300","#C70039","#E7A17E",
+                "#581845", "#CCCCFF", "#1B376F","#DE3163","#2980B9","#D35400","#8E44AD","#A9CCE3","#616A6B")
+drg %>% 
+  #Wybór odpowiednich kolumn
+  select(contains("use"),age) %>%
+  pivot_longer(cols = alcohol_use:sedative_use) %>% 
+  filter(name!="alcohol_use") %>%
+  #Modyfikacje ramki
+  mutate_at("name",str_replace,"_use","") %>%
+  mutate_at("name",str_replace,"_"," ") %>% 
+  mutate_at("name",str_to_sentence) %>%  
+  #Generowanie wykresu
+  ggplot(aes(x = reorder(name, value), y = value, fill=name)) + geom_col() + coord_flip() + labs(x="", y="%") + 
+  facet_wrap(~ age) + scale_fill_manual(values = paleta) + theme_minimal() + theme(legend.title = element_blank()) +
+  ggtitle("Rozkład procentowy środków odurzających w USA \n według grup wiekowych")
+```
+
+W tym zestawieniu zdecydowanym liderem jest marihuana. W niektórych grupach wiekowych jej spożycie w ciągu roku od przeprowadzenia badania wynosi ponad 30%. Mogłoby się wydawać, że w grupie 65+ liderem będą środki przeciwbólowe. Warto jednak pamiętać, że konopie indyjskie również mają właściwości uśmierzające ból, a ich użycie w celach medycznych lub rekreacyjnych jest dozwolone w wielu stanach. Co ciekawe substancja ta przoduje w każdej kategorii wiekowej, za wyjątkiem 12 latków.
+
+Kolejną najpopularniejszą substancją są środki przeciwbólowe, której średnie użycie w przekroju wszystkich grup wiekowych to około 5%. Następnie mamy środki halucynogenne oraz środki uspokajające, które są mniej więcej o połowę mniej popularne niż leki przeciwbólowe. W niektórych grupach wiekowych, w szczególności między 20 i 25 rokiem życia widoczny jest również wzrost użycia kokainy oraz środków pobudzających. Ciekawym trendem charakteryzują się substancje wziewne, które wraz z wiekiem są coraz mniej popularne. Szczyt ich użycia przypada na 16 rok życia. Użycie pozostałych środków jest znikome.
+
+#### Tabela z podsumowaniem 5 najpopularniejszych używek
+
+Jako dopełnienie poprzedniej analizy przedstawiono tabelę ze statystykami podsumowującymi pięciu najpopularniejszych środków odurzających (w tym alkoholu).
+
+```{r summ_use}
+drg0 <- drg
+colnames(drg0) <-  str_replace_all(colnames(drg0),"_use","")
+analiza_use <-  drg0 %>% 
+  select(!contains("_freq")) %>% 
+  select(!contains("age")) %>%
+  select(alcohol,marijuana, pain_releiver, hallucinogen, tranquilizer)
+knitr::kable(summary(analiza_use)) %>% 
+  kable_styling(bootstrap_options = "striped")
+```
+
+
+Zgodnie z przypuszczeniami alkohol wyraźnie góruje nad resztą używek. Jego mediana użycia na przekroju wszystkich grup wiekowych to prawie 65%. Następnie mamy maruhuanę z medianą spożycia wysokości niemal 21%, potem środki przeciwbólowe z medianą wynoszącą 6%. Podobną medianę mają zarówno środki halucynogenne jak i środki uspokajające, nieco ponad 3%.Substancje te jednak mają inny rozkład. Patrząc po wartościach pierwszego i trzeciego kwartyla, a także po wartościach maksymalnych i minimalnych można wywnioskować, że rozkład procentowego użycia substancji halucynogennych charakteryzuje się większym zróżnicowaniem w różnych grupach wiekowych.      
+
+#### Wykres porównawczy procentowego użycia alkoholu i marihuany w USA
+
+Kończąc pierwszą część analizy skupiono się na dokładniejszym porównaniu rozkładu procentowego dla alkoholu oraz marihuany.
+
+```{r, Prep_wykres2, echo=FALSE}
+use <- drug_use %>%
+  select(age, n, ends_with("_use")) %>%
+  pivot_longer(-c(age, n), names_to = "drug",
+               values_to = "use") %>%
+  mutate(drug = str_sub(drug, start=1, end=-5))
+#
+freq <- drug_use %>%
+  select(age, n, ends_with("_freq")) %>%
+  pivot_longer(-c(age, n),
+               names_to = "drug", values_to = "freq") %>%
+  mutate(drug = str_sub(drug, start=1, end=-6))
+
+drug_use_tidy <- left_join(x=use,
+                           y=freq, by = c("age", "n", "drug")) %>%
+  arrange(age)
+
+#
+wyroznienie <- drug_use_tidy %>% 
+  filter(drug =="alcohol"|drug=="marijuana") %>% 
+  group_by(drug) %>% 
+  summarise(szczyt=max(use)) %>% 
+  select(szczyt) %>% unlist() %>% as.numeric()
+```
+
+```{r, wykres2, fig.width=12, fig.height=9, warning=FALSE}
+drug_use_tidy %>% 
+  filter(drug =="alcohol"|drug=="marijuana") %>% 
+  ggplot(aes(factor(age),use))+
+  geom_col(aes(fill=age),alpha=0.95)+
+  geom_col(aes(age),
+           drug_use_tidy[(drug_use_tidy$use==wyroznienie),],
+           color="red",alpha=0,size=1.4)+
+  facet_wrap(vars(drug))+
+  scale_fill_viridis_d(direction = -1)+
+  theme_minimal()+
+  xlab("")+
+  ylab("")+
+  theme(legend.position="right")+
+  geom_text(aes(label=paste0(use,"%")),
+            drug_use_tidy[(drug_use_tidy$use==wyroznienie),],
+            color="red",vjust=-0.6,size=6)+
+  theme(strip.text.x = element_text(size=15),
+        axis.text.x = element_text(
+          size=11, angle=33, face="bold"),
+        title = element_text(size = 14),
+        axis.text.y = element_text(size = 11,face ="bold" ))+
+  ggtitle("Procentowe użycie alkoholu i marihuany \n
+          według grup wiekowych")
+```
+
+
+Na pierwszy rzut oka widać różnice w rozkładzie obu zmiennych. Rozkład dla alkoholu przypomina rozkład asymetryczny lewoskośny, natomiast rozkład dla marihuany jest bardziej symetryczny. Dodatkowo na wykresie wyraźnie widać przewagę popularności alkoholu wśród Amerykanów w każdej grupie wiekowej w porównaniu do marihuany. Wartości najwyższego procentowego spożycia w próbie używki te osiągają w czasach młodości badanych. W wieku 22-23 lat dla alkoholu (84,2% ankietowanych) oraz w wieku 20 lat dla marihuany (34% badanych).
+
+## Częstość użycia
+
+Ta część analizy jest poświęcona częstości spożywania analizowanych substancji. 
+
+Poniższe dane bazują na medianie ilości razy, kiedy ankietowany korzystał z poszczególnego środka w ciągu roku. 
+```{r}
+drg0 <- drg
+colnames(drg0) <-  str_replace_all(colnames(drg0),"_freq","")
+analiza_freq <-  drg0 %>% 
+  select(!contains("_use")) %>% 
+  select(!contains("age")) %>%
+  select(alcohol:sedative)
+knitr::kable(summary(analiza_freq[1:6])) %>% 
+  kable_styling(bootstrap_options = "striped")
+knitr::kable(summary(analiza_freq[7:13])) %>% 
+  kable_styling(bootstrap_options = "striped")
+```
+Najwyższe mediany, mówiące o tym, które substancje spożywane są największą ilość dni w ciągu roku, dotyczą heroiny, marihuany, alkoholu i metamfetaminy. Połowa ankietowanych korzysta ze środków uspakajających  i ze środków pobudzających nie więcej niż 10 dni w ciągu roku a połowa nie mniej niż 10 dni.
+
+Wziewne środki odurzające były używane maksymalnie tylko 19 dni, a z drugiej strony, środki pobudzające były używane maksymalnie 364 dni w ciągu roku.
+
+#### Porównanie substancji z najwyższymi wartościami środkowymi.
+```{r echo=FALSE}
+#tworzymy ramkę danych do wykresu
+
+analiza_freq_wykres <- drug_use_tidy %>% 
+                      select(drug,freq)
+
+#ręcznie dobrane, najładniejsze kolory
+kolory1<- c("#FFC300","#C70039","#E7A17E",
+                          "#581845", "#CCCCFF", "#1B376F")
+#argumenty dla najwyższych wartości mediany
+najwyzsza_mediana <- c("marijuana","alcohol","heroin","meth")
+```
+```{r warning=FALSE,fig.width=9, fig.height=7, dpi=500}
+#wykres
+analiza_freq_wykres %>% 
+  filter(drug %in% najwyzsza_mediana) %>% 
+  ggplot(aes(factor(drug),freq))+
+  geom_violin(aes(fill=drug),
+              show.legend = FALSE,alpha=0.39,
+              colour="#A49A97",
+              trim = F)+
+              coord_flip()+
+  geom_dotplot(binaxis="y",binwidth = 2,
+               stackdir="center",method = "histodot",
+               aes(fill=drug),
+               show.legend = FALSE,
+               colour="#A49A97")+
+  theme_minimal()+
+  xlab("")+
+  ylab("Dni")+
+  theme(axis.title = element_text(size=15,hjust = 0.07),
+        axis.text.x = element_text(face ="bold"),
+        axis.text.y = element_text(size = 11,
+                      face = "bold.italic"),
+        title = element_text(size=14,))+
+scale_y_continuous(breaks = c(seq(from = 0,
+                                    to = 360, by = 30)))+
+ggtitle("Ilość dni w roku, gdy Amerykanie spożywają alkohol i narkotyki")+
+scale_fill_manual(values=viridis::plasma(n=4))
+```
+
+
+Zdecydowanie najbardziej wyróżniającą się susbtancją jest heroina. Businessinsider wymienia ją na pierwszym miejscu, pod względem najbardziej uzależniających substancji. W naszym przypadku wysokie wartośći kwartyla pierwszego i mediany także mogą wskazywać na silny nałóg, w jaki wprowadza ta substancja, już od pierwszych dni użytkowania.
+
+Z wykresu punktowego (ang. dot plot) wynika, że alkohol charakteryzuje się najczęstszymi wartościami w próbce, tzn., że najwięcej różnych grup ankietowanych pod względem wieku, spożywa alkohol jednakową ilość dni.
+
+Przyjrzyjmy się bliżej grupom wiekowym, które spożywają alkohol.
+
+```{r, echo=FALSE}
+knitr::kable(drug_use_tidy %>% 
+  filter(drug=="alcohol") %>% 
+  select(wiek=age,'ilość dni spożycia alkoholu'=freq) %>% 
+  arrange(desc(wiek)) %>% 
+    t()) %>% 
+  kable_material(position="center",font_size=15)%>% 
+  column_spec(1,bold=T) %>% 
+  column_spec(2:9,background ="#F0F0F0" ) %>% 
+  scroll_box(height = "100%",width = "850px")
+
+```
+Odkryliśmy pewną prawidłowość. Ilość dni spożywania alkoholu, w przypadku ankietowanych powyżej 21 roku życia jest jednakowa. 
+
+Czy ankietowani, którzy spożywają alkohol tak samo często, będą uzależnieni od heroiny w podobnie długim okresie?
+
+```{r echo=FALSE}
+#grupy wiekowe
+grupy_wiekowe1 <-c("21","22-23","26-29","30-34","35-49","50-64","65+")
+drug_use_tidy$freq <- floor(drug_use_tidy$freq)
+```
+```{r fig.width=9, fig.height=7,dpi=150}
+#wykres
+par(cex=1.2)
+
+drug_use_tidy %>% 
+  filter(age %in% grupy_wiekowe1,drug=="alcohol"|
+  drug=="heroin") %>% 
+  select(freq,drug,age) %>%
+  filter(!is.na(freq)) %>% 
+  chordDiagram(directional = -1,
+        transparency = 0.3,
+        annotationTrack = c("name","grid"),
+          grid.col=viridis::inferno(n=10,direction = 1))
+legend("topleft", legend=c( "120","41","280","66","50","57","30","52"),
+       col=viridis::inferno(n=10,direction = -1)[3:11],pch = 15, cex=0.8)
+mtext("ilość dni", side = 3,adj = 0.002 ,cex = 1)
+mtext("Częstość spożywania alkoholu i heroiny", side = 3,cex = 1.3,font = 2)
+
+```
+Diagram akordowy doskonale obrazuje brak związku pomiędzy długością dni spożywania alkoholu i heroiny, w grupie ankietowanych powyżej 21 roku życia. Wartości środkowe dla poszczególnych grup wiekowych są różne. 
+
+Tabela: spożycie heroiny
+```{r}
+drg0$heroin <- floor(drg0$heroin)
+knitr::kable(drg0%>% 
+  filter(age %in% grupy_wiekowe1) %>% 
+  select(wiek=age,'dni spożycia heroiny'= heroin) %>% 
+    t()) %>% 
+  kable_material(font_size=15) %>% 
+  column_spec(1,bold=T) 
+```
+
+#### Analiza częstości ze względu na średnią
+```{r fig.width=9, fig.height=7}
+#  szukamy median do wykresu (muszą być posortowane alfabetycznie)
+mediana <-matrixStats::colMedians(as.matrix(analiza_freq[,order(colnames(analiza_freq))]),na.rm = T) %>% round(1)
+#wykres
+(analiza_freq_wykres %>% 
+  group_by(nazwa=drug) %>% 
+  summarise(srednia=round(mean(freq,na.rm = T),1)) %>%
+   mutate_at("nazwa",str_replace,
+             "pain_releiver","pain releiver") %>% 
+  ggplot(aes(nazwa,srednia,label=mediana))+
+  geom_point(shape = 21, fill = "#1B376F", color = "white", size = 4) + 
+  geom_line(group = 1, color = "#C70039")+
+  geom_hline(yintercept = mean(analiza_freq_wykres$freq,na.rm=T), color = "#34495E", lty = 2)+
+   theme_minimal()+
+    ylab("")+
+    xlab("")+
+   theme(axis.text.x = element_text(size = 10))) %>% 
+  ggplotly(
+    tooltip = c("nazwa","srednia","mediana")) %>%
+    layout(dragmode = "select",
+           hoverdistance=25,
+           title=list(text="Średnia ilość dni spożycia alkoholu i narkotyków",x=0.03,y=0.97),
+           xaxis=list(tickangle=-85))
+
+```
+Średnia częstość korzystania z wziewnych środków odurzających (ang. inhalant) jest najniższa, a średnia ilość dni spożywania heroiny jest wyraźnie wyżej od pozostałych narkotyków.
+
+Z wykresu wynika, że kokaina jest średnio rzadziej spożywana od jej pochodnej (kraku), najprawdopodobniej ze względu na znacznie wyższą cenę i fakt, że krak jest uznawany za najbardziej uzależniającą odmianę kokainy (w statystykach mediana i wartość maksymalna są znacznie wyższe dla kokainy w formie wolnej zasady).
+
+W przypadku środków pobudzających (ang. stimulant), średnia nie jest miarodajna i lepiej przyjrzeć się medianie.
+
+# Wnioski
+
+* Alkohol i marihuana to najbardziej popularne substancje, co trzeci dwudziestolatek palił marihuanę, a ponad połowa osiemnastolatków spożywała alkohol.
+* Mediana częstości spożywania alkoholu w przypadku ankietowanych powyżej 21 roku życia jest jednakowa  i wynosi 52 dni.
+* Heroina ma najwyższą wartość środkową i średnią częstości użycia. Połowa ankietowanych w wieku od 35 do 49 roku życia spożywa ją nie mniej niż 280 dni w roku, a połowa nie więcej niż 280 dni.
+
+# Co dalej?
+
+W celu uzyskania pełniejszego obrazu należałoby:
+
+* Poszukać takich samych danych z innego roku i przeprowadzić analizę porównawczą, w celu ustalenia występowania zmian. Zbadać, czy używanie substancji psychoaktywnych pozostaje charakterystyczne dla konkretnych pokoleń (Baby boomers, Gen X, Millenials), czy też nawyki korzystania z danych używek są zawsze jednakowe dla poszczególnych grup wiekowych.
+
+* Dodatkowo przeprowadzić analizę korelacji między częstością użycia poszczególnych używek, a ich sile uzależniającej. Do tego również potrzebny jest nowy zbiór danych, przedstawiający najsilniej uzależniające substancje.
+
+#### Dodatkowe źródła
+[https://jokergoo.github.io/circlize_book/book/](https://jokergoo.github.io/circlize_book/book/)
+
+[http://www.biecek.pl/R/PrzewodnikPoPakiecieRWydanieIVinternet.pdf](http://www.biecek.pl/R/PrzewodnikPoPakiecieRWydanieIVinternet.pdf)
+
+[https://plotly-r.com/controlling-tooltips.html#tooltip-text](https://plotly-r.com/controlling-tooltips.html#tooltip-text)
+</div>
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
