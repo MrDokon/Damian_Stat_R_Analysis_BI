@@ -2,7 +2,8 @@
 title: "Analiza użycia środków odurzających w USA w roku 2015 w różnych grupach wiekowych"
 author: "Mateusz Nowak, Damian Okoń"
 output: 
-  rmarkdown::github_document:
+  html_document:
+  keep_md: true
     toc: true
     toc_float:
       collapsed: false
